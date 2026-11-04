@@ -10,7 +10,9 @@
   python3 jmkit/jm.py import <파일.json> [--replace] 분석 결과 한꺼번에 넣기
   python3 jmkit/jm.py run [번호 ... | all]           자동 검증 실행 → 결과 기록 · 연결된 할 일 갱신
   python3 jmkit/jm.py watch [초=30]                  watch=true 검증을 주기적으로 실행(화면 실시간 갱신용 · Ctrl+C 로 끝)
-  python3 jmkit/jm.py export                         docs/jm/BOARD.md 다시 쓰기
+  python3 jmkit/jm.py note <이름> "글"                 제출 문서의 note:<이름> 칸에 들어갈 글 저장(빈 글이면 지움)
+  python3 jmkit/jm.py deliver                        제출 문서(docs/jm/deliver.json 에 적은 md)를 지금 다시 쓰기
+  python3 jmkit/jm.py export                         docs/jm/BOARD.md 다시 쓰기(제출 문서도 같이)
 
 칸: req question feature decision auto manual todo commit essay
 값은 따옴표로 감싼다. 숫자 · true/false 는 그대로 들어간다(예: watch=true timeout=30).
@@ -151,6 +153,31 @@ def main(argv):
                 time.sleep(every)
         except KeyboardInterrupt:
             return 0
+
+    if cmd == "note":
+        if not args:
+            raise ValueError("이름이 필요함 (예: note ai \"...\")")
+        key, text = args[0], " ".join(args[1:])
+
+        def setnote(b):
+            if text:
+                b["notes"][key] = text
+            else:
+                b["notes"].pop(key, None)
+        jmlib.mutate(root, setnote)
+        jmlib.write_export(root)
+        print("note:%s %s" % (key, "저장" if text else "지움"))
+        return 0
+
+    if cmd == "deliver":
+        if not jmlib.load_deliver(root):
+            print("제출 문서 설정 없음 — %s 를 먼저 만든다($jm 제출문서)" % jmlib.DELIVER)
+            return 0
+        for path, changed, warns in jmlib.render_deliverables(root):
+            print("%s · 바뀐 칸 %d" % (path, changed))
+            for w in warns:
+                print("   경고: " + w)
+        return 0
 
     if cmd == "export":
         print(jmlib.write_export(root))

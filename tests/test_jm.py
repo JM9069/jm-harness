@@ -98,6 +98,59 @@ class CheckTest(Base):
         self.assertEqual(self.jm("run").returncode, 1)
 
 
+class DeliverTest(Base):
+    def write_cfg(self, cfg):
+        p = os.path.join(self.root, "docs", "jm", "deliver.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False)
+
+    def read(self, rel):
+        with open(os.path.join(self.root, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_auto_sections_follow_board_and_manual_text_survives(self):
+        self.jm("init")
+        self.write_cfg({"files": [{"path": "DECISIONS.md", "title": "판단 기록", "sections": [
+            {"title": "담당자와 확인한 기준", "source": "answers"},
+            {"title": "AI 제안과 내 판단", "source": "ai_judgments"},
+            {"title": "내가 직접 쓴 회고", "mode": "manual", "hint": "직접 작성"},
+            {"title": "남은 확인 사항", "source": "open_items"}]}]})
+        self.jm("add", "question", "text=하루 경계는?")
+        text = self.read("DECISIONS.md")
+        self.assertIn("## 담당자와 확인한 기준", text)
+        self.assertIn("하루 경계는?", text)  # 아직 답이 없으니 남은 확인 사항에
+        # 직접 칸과 표시 밖에 사람이 쓴 글
+        text = text.replace("<!-- 직접 작성 칸: 직접 작성 -->", "내가 쓴 회고 문장")
+        with open(os.path.join(self.root, "DECISIONS.md"), "w", encoding="utf-8") as f:
+            f.write(text + "\n맨 끝 메모\n")
+        self.jm("set", "Q1", "status=answered", "answer=자정 기준")
+        self.jm("add", "decision", "title=수집 주기", "recommend=5분", "chosen=5분", "reason=서버 부담")
+        text = self.read("DECISIONS.md")
+        self.assertIn("자정 기준", text)
+        self.assertIn("| D1 | 수집 주기 | 5분 | 5분 | 채택 |", text)
+        self.assertIn("내가 쓴 회고 문장", text)
+        self.assertIn("맨 끝 메모", text)
+
+    def test_note_source_and_unchanged_file_not_rewritten(self):
+        self.jm("init")
+        self.write_cfg({"files": [{"path": "docs/AI_COLLAB.md", "sections": [{"title": "협업 요약", "source": "note:ai"}]}]})
+        self.jm("note", "ai", "분석은 Codex, 결정은 내가")
+        self.assertIn("분석은 Codex, 결정은 내가", self.read("docs/AI_COLLAB.md"))
+        mtime = os.path.getmtime(os.path.join(self.root, "docs", "AI_COLLAB.md"))
+        self.jm("deliver")
+        self.assertEqual(mtime, os.path.getmtime(os.path.join(self.root, "docs", "AI_COLLAB.md")))
+
+    def test_bad_paths_and_sources_rejected(self):
+        self.jm("init")
+        self.write_cfg({"files": [{"path": "../outside.md", "sections": []}]})
+        self.assertRaises(ValueError, jmlib.load_deliver, self.root)
+        self.write_cfg({"files": [{"path": "kit/x.md", "sections": []}]})
+        self.assertRaises(ValueError, jmlib.load_deliver, self.root)
+        self.write_cfg({"files": [{"path": "A.md", "sections": [{"title": "x", "source": "rm -rf"}]}]})
+        self.assertRaises(ValueError, jmlib.load_deliver, self.root)
+
+
 class CodexLogTest(Base):
     def test_parse_skips_injected_and_filters_cwd(self):
         home = os.path.join(self.root, "codexhome")
@@ -193,6 +246,71 @@ class HubTest(Base):
         self.assertEqual(self.req("/api/run", {})[0], 404)
         code, _ = self.req("/..%2F..%2Fjmlib.py")
         self.assertEqual(code, 404)
+
+
+class SendTest(Base):
+    UUID = "019a0000-1111-7222-8333-444455556666"
+
+    def setUp(self):
+        super().setUp()
+        self.jm("init")
+        self.home = os.path.join(self.root, "codexhome")
+        d = os.path.join(self.home, "sessions", "2026", "11", "05")
+        os.makedirs(d)
+        with open(os.path.join(d, "rollout-a.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "session_meta", "payload": {"id": self.UUID, "cwd": self.root}}) + "\n")
+        with open(os.path.join(self.home, "session_index.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"id": self.UUID, "thread_name": "MAIN"}) + "\n")
+        self.srv = hub.make_server(self.root, "127.0.0.1", 0, codex_home=self.home, key="k3y12345")
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.sent = []
+        self.orig = jmlib.send_to_codex
+        jmlib.send_to_codex = lambda t, m: (self.sent.append((t, m)), {"ok": True, "code": 0, "out": ""})[1]
+
+    def tearDown(self):
+        jmlib.send_to_codex = self.orig
+        self.srv.shutdown()
+        self.srv.server_close()
+        super().tearDown()
+
+    def post(self, body, key="k3y12345"):
+        r = urllib.request.Request("http://127.0.0.1:%d/api/send" % self.port, data=json.dumps(body).encode("utf-8"))
+        r.add_header("Content-Type", "application/json")
+        r.add_header("X-JM", "1")
+        if key is not None:
+            r.add_header("X-JM-Key", key)
+        try:
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode("utf-8"))
+
+    def test_session_name_shown(self):
+        s = jmlib.codex_sessions(self.root, codex_home=self.home)
+        self.assertEqual((s[0]["uuid"], s[0]["name"]), (self.UUID, "MAIN"))
+
+    def test_send_needs_right_key(self):
+        self.assertEqual(self.post({"threads": [self.UUID], "message": "hi"}, key=None)[0], 401)
+        self.assertEqual(self.post({"threads": [self.UUID], "message": "hi"}, key="wrong")[0], 401)
+        self.assertEqual(self.sent, [])
+
+    def test_send_only_to_this_workspace_sessions(self):
+        code, j = self.post({"threads": [self.UUID, "019a0000-0000-7000-8000-000000000000"], "message": "$jm 진행"})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.sent, [(self.UUID, "$jm 진행")])
+        self.assertFalse(j["ok"])  # 다른 세션은 거부되어 일부 실패
+
+    def test_lockout_after_many_wrong_keys(self):
+        for _ in range(hub.MAX_KEY_FAILS):
+            self.post({"threads": [self.UUID], "message": "x"}, key="bad")
+        self.assertEqual(self.post({"threads": [self.UUID], "message": "x"})[0], 429)
+
+    def test_send_validation(self):
+        self.assertRaises(ValueError, self.orig, "not-a-uuid", "hi")
+        self.assertRaises(ValueError, self.orig, self.UUID, "")
+        r = self.orig(self.UUID, "hi", codex_bin="no-such-codex-binary-xyz")
+        self.assertFalse(r["ok"])
 
 
 if __name__ == "__main__":

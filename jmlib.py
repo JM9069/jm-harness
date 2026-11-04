@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 
 try:
@@ -112,6 +113,7 @@ def load(root):
         b = json.load(f)
     for sec in SECTIONS:  # 옛 판에 칸이 없으면 채운다
         b.setdefault(sec, [])
+    b.setdefault("notes", {})
     return b
 
 
@@ -343,7 +345,8 @@ def parse_session(path):
             typ = o.get("type")
             if typ == "session_meta":
                 info["cwd"] = p.get("cwd", "")
-                info["id"] = str(p.get("id", ""))[:8]
+                info["uuid"] = str(p.get("id", ""))
+                info["id"] = info["uuid"][:8]
             elif typ == "response_item" and p.get("type") == "message" and p.get("role") in ("user", "assistant"):
                 text = _text_of(p.get("content")).strip()
                 if not text or (p["role"] == "user" and _is_injected(text)):
@@ -363,9 +366,19 @@ def codex_sessions(root, codex_home=None, limit=3, hours=12):
     files = glob.glob(os.path.join(home, "sessions", "**", "rollout-*.jsonl"), recursive=True)
     cutoff = time.time() - hours * 3600
     files = sorted((f for f in files if os.path.getmtime(f) >= cutoff), key=os.path.getmtime, reverse=True)
+    names = {}  # /rename 으로 붙인 세션 이름 — 나중 줄이 최신
+    idx = os.path.join(home, "session_index.jsonl")
+    if os.path.exists(idx):
+        with open(idx, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                    names[o["id"]] = o.get("thread_name") or ""
+                except (ValueError, KeyError, TypeError):
+                    pass
     out = []
     rootn = os.path.normcase(os.path.abspath(root))
-    for f in files[:20]:
+    for f in files[:30]:
         try:
             s = parse_session(f)
         except OSError:
@@ -373,11 +386,36 @@ def codex_sessions(root, codex_home=None, limit=3, hours=12):
         cwd = os.path.normcase(os.path.abspath(s["cwd"])) if s["cwd"] else ""
         if cwd and not (cwd.startswith(rootn) or rootn.startswith(cwd)):
             continue
-        s = dict(s, msgs=s["msgs"][-30:])
+        name = names.get(s.get("uuid", ""), "")
+        if name == "Guardian review":  # 승인 자동 검토용 내부 세션은 뺀다
+            continue
+        s = dict(s, name=name, msgs=s["msgs"][-30:])
         out.append(s)
         if len(out) >= limit:
             break
     return out
+
+
+UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def send_to_codex(thread, message, codex_bin=None, timeout=30):
+    """열려 있는 Codex 세션에 글을 넣는다 — `codex queue --thread <UUID> --message <글>` (셸 없이 인자 목록으로).
+    받는 세션이 일하는 중이면 그 턴이 끝난 뒤 들어간다. 성공 = «큐 등록» 까지(읽었다는 뜻 아님)."""
+    if not UUID_RE.fullmatch(thread or ""):
+        raise ValueError("세션 번호(UUID) 모양이 아님")
+    message = (message or "").strip()
+    if not message or len(message) > 4000:
+        raise ValueError("글은 1 ~ 4000자")
+    exe = codex_bin or os.environ.get("JM_CODEX_BIN") or "codex"
+    try:
+        p = subprocess.run([exe, "queue", "--thread", thread, "--message", message], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        return {"ok": p.returncode == 0, "code": p.returncode, "out": ((p.stdout or "") + (p.stderr or ""))[-800:]}
+    except FileNotFoundError:
+        return {"ok": False, "code": None, "out": "codex 명령을 찾을 수 없음"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "code": None, "out": "시간 초과(%d초)" % timeout}
 
 
 # ======= 사람이 읽는 판 =======
@@ -422,12 +460,206 @@ def export_md(board):
 
 
 def write_export(root, board=None):
+    """진행판이 바뀔 때마다 부른다 — BOARD.md 와 제출 문서(deliver.json 이 있으면)를 다시 쓴다."""
     board = board or load(root)
     path = os.path.join(root, "docs", "jm", "BOARD.md")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(export_md(board))
+    try:
+        render_deliverables(root, board)
+    except ValueError as e:  # 설정이 틀려도 진행판 저장은 막지 않는다
+        print("제출 문서 설정 오류: %s" % e, file=sys.stderr)
     return path
+
+
+# ======= 제출 문서 자동 갱신 =======
+# 시험장 README 가 요구하는 md 파일(예: DECISIONS.md · AI 협업 기록)을 docs/jm/deliver.json 에 적어 두면
+# 진행판이 바뀔 때마다 «자동 칸» 만 다시 쓴다. «직접 칸»(mode=manual)과 표시 밖의 글은 건드리지 않는다.
+DELIVER = os.path.join("docs", "jm", "deliver.json")
+SOURCES = ("summary", "deliverables", "requirements", "answers", "questions_open", "decisions", "ai_judgments",
+           "features", "unfinished", "checks", "auto_checks", "manual_checks", "todos", "commits", "prompts",
+           "open_items")
+
+
+def deliver_path(root):
+    return os.path.join(root, DELIVER)
+
+
+def load_deliver(root):
+    p = deliver_path(root)
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding="utf-8") as f:
+        cfg = json.load(f)
+    rootn = os.path.normcase(os.path.abspath(root))
+    for fi in cfg.get("files", []):
+        rel = fi.get("path", "")
+        full = os.path.normcase(os.path.abspath(os.path.join(root, rel)))
+        if (not rel.endswith(".md") or not full.startswith(rootn + os.sep)
+                or re.match(r"(\.git|jmkit|kit)([\\/]|$)", rel)):
+            raise ValueError("제출 문서 경로는 작업 폴더 안의 .md 만: %s" % rel)
+        for s in fi.get("sections", []):
+            src = s.get("source", "")
+            if s.get("mode") != "manual" and not (src in SOURCES or src.startswith("note:") or src.startswith("text:")):
+                raise ValueError("%s 의 «%s» 칸: 모르는 source %s" % (rel, s.get("title"), src))
+    return cfg
+
+
+def _rows(header, rows):
+    if not rows:
+        return "(아직 없음)"
+    out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    for r in rows:
+        out.append("| " + " | ".join(str(c if c not in (None, "") else "-").replace("|", "\\|").replace("\n", " ")
+                                      for c in r) + " |")
+    return "\n".join(out)
+
+
+def render_source(root, board, src, git=None):
+    b = board
+    if src.startswith("text:"):
+        return src[5:]
+    if src.startswith("note:"):
+        return b.get("notes", {}).get(src[5:]) or "(아직 없음 — `jm.py note %s \"...\"`)" % src[5:]
+    if src == "summary":
+        return b.get("summary") or "(아직 없음)"
+    if src == "deliverables":
+        return "\n".join("- " + d for d in b.get("deliverables") or []) or "(아직 없음)"
+    if src == "requirements":
+        return _rows(["번호", "README 요구", "반영"], [(x["id"], x.get("text"), x.get("where")) for x in b["req"]])
+    if src == "answers":
+        rows = [(x["id"], x.get("text"), x.get("answer"), x.get("why")) for x in b["question"] if x.get("status") == "answered"]
+        return _rows(["번호", "확인한 것", "담당자 답", "반영"], rows)
+    if src == "questions_open":
+        return _rows(["번호", "아직 확인 못 한 것", "답에 따라 바뀌는 것"],
+                     [(x["id"], x.get("text"), x.get("why")) for x in b["question"] if x.get("status") != "answered"])
+    if src == "decisions":
+        rows = [(x["id"], x.get("title"), x.get("chosen") or "(미정)", x.get("reason"),
+                 " / ".join(x["options"]) if isinstance(x.get("options"), list) else x.get("options"),
+                 x.get("rejected")) for x in b["decision"]]
+        return _rows(["번호", "정한 것", "결정", "이유", "검토한 선택지", "버린 안과 이유"], rows)
+    if src == "ai_judgments":
+        rows = [(x["id"], x.get("title"), x.get("recommend"), x.get("chosen") or "(미정)",
+                 "채택" if x.get("chosen") and x.get("recommend") and x["chosen"] in x["recommend"] else
+                 ("다르게 정함" if x.get("chosen") else "-"), x.get("reason")) for x in b["decision"]]
+        return _rows(["번호", "판단할 것", "AI 제안", "내 결정", "채택 여부", "이유"], rows)
+    if src == "features":
+        return _rows(["번호", "기능", "중요도", "상태", "메모"],
+                     [(x["id"], x.get("title"), x.get("priority"), x.get("status"), x.get("note")) for x in b["feature"]])
+    if src == "unfinished":
+        rows = [(x["id"], x.get("title"), x.get("status"), x.get("note")) for x in b["feature"] if x.get("status") != "done"]
+        return _rows(["번호", "구현 안 됨 · 안 함", "상태", "이유"], rows)
+    if src in ("checks", "auto_checks"):
+        rows = [(x["id"], x.get("title"), "`%s`" % x.get("cmd", ""),
+                 ("통과" if x["last"]["ok"] else "실패 (종료코드 %s)" % x["last"]["code"]) + " · " + x["last"]["at"]
+                 if x.get("last") else "안 돌림") for x in b["auto"]]
+        out = "**자동 검증**\n\n" + _rows(["번호", "확인", "명령", "결과"], rows)
+        if src == "auto_checks":
+            return out
+        return out + "\n\n" + render_source(root, b, "manual_checks")
+    if src == "manual_checks":
+        return "**직접 확인**\n\n" + _rows(["번호", "확인", "방법", "결과", "메모"],
+                                         [(x["id"], x.get("title"), x.get("how"), x.get("status"), x.get("note")) for x in b["manual"]])
+    if src == "todos":
+        return "\n".join("- [%s] %s %s" % ("x" if x.get("status") == "done" else " ", x["id"], x.get("title", ""))
+                         for x in b["todo"]) or "(아직 없음)"
+    if src == "commits":
+        g = git if git is not None else git_info(root)
+        return "\n".join("- `%s` %s" % (c["hash"], c["msg"]) for c in g.get("log", [])) or "(아직 없음)"
+    if src == "prompts":
+        lines = []
+        for s in codex_sessions(root, limit=5):
+            for m in s["msgs"]:
+                if m["role"] == "user":
+                    lines.append("- %s · %s" % ((m.get("ts") or "")[11:16], m["text"].replace("\n", " ")[:160]))
+        return "\n".join(lines[-40:]) or "(아직 없음)"
+    if src == "open_items":
+        parts = [render_source(root, b, "questions_open"),
+                 _rows(["번호", "아직 정하지 못한 것"], [(x["id"], x.get("title")) for x in b["decision"] if x.get("status") != "decided"]),
+                 _rows(["번호", "남은 할 일"], [(x["id"], x.get("title")) for x in b["todo"] if x.get("status") != "done"])]
+        return "\n\n".join(parts)
+    raise ValueError("모르는 source: %s" % src)
+
+
+def deliver_state(root):
+    """허브 «제출 문서» 탭용 — 설정과 파일 내용(앞 20000자)."""
+    try:
+        cfg = load_deliver(root)
+    except (ValueError, OSError) as e:
+        return {"config": None, "error": str(e), "files": []}
+    if not cfg:
+        return {"config": None, "error": "", "files": []}
+    files = []
+    for fi in cfg.get("files", []):
+        full = os.path.join(root, fi["path"])
+        content = ""
+        if os.path.exists(full):
+            with open(full, encoding="utf-8", errors="replace") as f:
+                content = f.read(20000)
+        files.append({"path": fi["path"], "exists": os.path.exists(full), "content": content,
+                      "sections": [{"title": s.get("title"), "mode": s.get("mode", "auto"), "source": s.get("source", "")}
+                                   for s in fi.get("sections", [])]})
+    return {"config": True, "error": "", "files": files}
+
+
+def _block(sid, body):
+    return "<!-- jm:begin %s -->\n%s\n<!-- jm:end %s -->" % (sid, body.strip(), sid)
+
+
+def render_deliverables(root, board=None):
+    """설정된 제출 문서를 만들거나 «자동 칸» 만 바꾼다. 돌려주는 값: [(경로, 바뀐 칸 수, 경고 목록)]."""
+    cfg = load_deliver(root)
+    if not cfg:
+        return []
+    board = board or load(root)
+    git = git_info(root)
+    report = []
+    for fi in cfg.get("files", []):
+        full = os.path.join(root, fi["path"])
+        text = None
+        if os.path.exists(full):
+            with open(full, encoding="utf-8") as f:
+                text = f.read()
+        before = text
+        warns, changed = [], 0
+        if text is None:  # 처음: 제목 + 칸을 차례로
+            parts = ["# " + (fi.get("title") or os.path.splitext(os.path.basename(fi["path"]))[0])]
+            if fi.get("intro"):
+                parts.append(fi["intro"])
+            for i, s in enumerate(fi.get("sections", [])):
+                parts.append("## " + s["title"])
+                if s.get("mode") == "manual":
+                    parts.append("<!-- 직접 작성 칸: %s -->\n" % (s.get("hint") or "이 칸은 내가 직접 쓴다"))
+                else:
+                    parts.append(_block(s.get("id") or "s%d" % (i + 1), render_source(root, board, s["source"], git)))
+                changed += 1
+            text = "\n\n".join(parts) + "\n"
+        else:
+            for i, s in enumerate(fi.get("sections", [])):
+                sid = s.get("id") or "s%d" % (i + 1)
+                if s.get("mode") == "manual":
+                    if ("## " + s["title"]) not in text:
+                        text = text.rstrip("\n") + "\n\n## %s\n\n<!-- 직접 작성 칸: %s -->\n" % (s["title"], s.get("hint") or "")
+                        changed += 1
+                    continue
+                pat = re.compile(r"<!-- jm:begin %s -->.*?<!-- jm:end %s -->" % (re.escape(sid), re.escape(sid)), re.S)
+                new = _block(sid, render_source(root, board, s["source"], git))
+                if pat.search(text):
+                    text2 = pat.sub(lambda m: new, text, count=1)
+                    changed += text2 != text
+                    text = text2
+                elif ("## " + s["title"]) in text:
+                    warns.append("«%s» 칸의 자동 표시가 지워져 갱신하지 않음" % s["title"])
+                else:
+                    text = text.rstrip("\n") + "\n\n## %s\n\n%s\n" % (s["title"], new)
+                    changed += 1
+        if text != before:  # 바뀐 게 없으면 쓰지 않는다(편집기의 «외부 변경» 알림을 줄인다)
+            os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+            with open(full, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+        report.append((fi["path"], changed, warns))
+    return report
 
 
 def snapshot(board):

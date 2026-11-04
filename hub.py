@@ -7,13 +7,19 @@
 - GET  /api/state   진행판 + git + Codex 대화 (읽기만)
 - POST /api/item    화면에서 고칠 수 있는 칸만: 상태 · 받은 답 · 결정 · 메모 · 서술형 연습 기록
 
-안전: 이 서버는 명령을 실행하지 않는다. 자동 검증(명령)은 터미널의 `jm.py run` · `jm.py watch` 만 돌리고,
+- POST /api/send    {threads: [UUID...], message} — 열린 Codex 세션에 글 넣기(codex queue). 열쇠 필요
+
+안전: 이 서버는 셸 명령을 실행하지 않는다. 자동 검증(명령)은 터미널의 `jm.py run` · `jm.py watch` 만 돌리고,
 명령(cmd)을 만들거나 바꾸는 것도 jm.py 로만 한다. 화면에서 바꿀 수 있는 칸은 아래 EDITABLE 뿐이다.
 쓰기 요청은 X-JM: 1 머리글이 있어야 받는다(다른 포트의 페이지가 몰래 보내는 요청 차단).
+Codex 로 글 보내기는 서버를 켤 때 터미널에만 찍히는 열쇠(X-JM-Key)가 맞아야 하고,
+이 작업 폴더에서 띄운 세션(대화 기록으로 확인)에만 보낸다 — 미리보기 주소가 밖에 알려져도 남이 Codex 를 부리지 못하게.
 """
 import argparse
+import hmac
 import json
 import os
+import secrets
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,7 +63,12 @@ def clean_fields(section, fields):
     return out
 
 
-def make_handler(root, codex_home=None):
+MAX_KEY_FAILS = 20  # 열쇠를 이만큼 틀리면 서버를 다시 켤 때까지 보내기를 막는다(찍어 맞히기 방지)
+
+
+def make_handler(root, codex_home=None, key=None):
+    fails = {"n": 0}
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):  # 터미널을 조용히
             pass
@@ -77,6 +88,7 @@ def make_handler(root, codex_home=None):
                 return self.send_json(200, {
                     "root": root, "now": time.strftime("%H:%M:%S"), "board": jmlib.load(root),
                     "git": jmlib.git_info(root), "codex": jmlib.codex_sessions(root, codex_home),
+                    "deliver": jmlib.deliver_state(root),
                 })
             if path.endswith("/api/health"):
                 return self.send_json(200, {"status": "ok"})
@@ -96,13 +108,13 @@ def make_handler(root, codex_home=None):
         def do_POST(self):
             if self.headers.get("X-JM") != "1":
                 return self.send_json(403, {"error": "X-JM 머리글 없음"})
-            if not self.path.split("?", 1)[0].endswith("/api/item"):
+            path = self.path.split("?", 1)[0]
+            if path.endswith("/api/send"):
+                return self.send_codex()
+            if not path.endswith("/api/item"):
                 return self.send_json(404, {"error": "없음"})
             try:
-                n = int(self.headers.get("Content-Length") or 0)
-                if n > 200000:
-                    raise ValueError("요청이 너무 큼")
-                data = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+                data = self.read_json()
                 sec, item_id = data.get("section"), data.get("id")
                 fields = clean_fields(sec, data.get("fields"))
                 jmlib.mutate(root, lambda b: jmlib.update(b, sec, item_id, fields))
@@ -110,11 +122,50 @@ def make_handler(root, codex_home=None):
                 return self.send_json(200, {"ok": True, "id": item_id})
             except (ValueError, KeyError) as e:
                 return self.send_json(400, {"error": str(e.args[0] if e.args else e)})
+
+        def read_json(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 200000:
+                raise ValueError("요청이 너무 큼")
+            return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+
+        def send_codex(self):
+            if fails["n"] >= MAX_KEY_FAILS:
+                return self.send_json(429, {"error": "열쇠를 너무 많이 틀림 — 허브를 다시 켜세요(start.sh stop → start)"})
+            if not key or not hmac.compare_digest(self.headers.get("X-JM-Key", ""), key):
+                fails["n"] += 1
+                return self.send_json(401, {"error": "열쇠가 맞지 않음 — 허브를 켠 터미널에 찍힌 열쇠를 넣으세요"})
+            try:
+                data = self.read_json()
+                threads = data.get("threads") or []
+                if not isinstance(threads, list) or not threads or len(threads) > 10:
+                    raise ValueError("보낼 세션을 1 ~ 10개 고르세요")
+                mine = {s.get("uuid") for s in jmlib.codex_sessions(root, codex_home, limit=10)}
+                results = {}
+                for t in threads:
+                    if t not in mine:
+                        results[t] = {"ok": False, "code": None, "out": "이 작업 폴더의 최근 세션이 아님"}
+                    else:
+                        results[t] = jmlib.send_to_codex(t, data.get("message", ""))
+                return self.send_json(200, {"ok": all(r["ok"] for r in results.values()), "results": results})
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e.args[0] if e.args else e)})
     return Handler
 
 
-def make_server(root, host="0.0.0.0", port=3156, codex_home=None):
-    return ThreadingHTTPServer((host, port), make_handler(root, codex_home))
+def make_server(root, host="0.0.0.0", port=3156, codex_home=None, key=None):
+    return ThreadingHTTPServer((host, port), make_handler(root, codex_home, key))
+
+
+def save_key(port, key):
+    """열쇠를 ~/.jm/hub-<포트>.key 에(본인만 읽기) — start.sh 가 터미널에 보여 준다."""
+    d = os.path.join(os.path.expanduser("~"), ".jm")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "hub-%d.key" % port)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(key + "\n")
+    return p
 
 
 def main():
@@ -132,8 +183,10 @@ def main():
         with jmlib.locked(root):
             jmlib.save(root, b)
         jmlib.write_export(root, b)
-    srv = make_server(root, a.host, a.port)
-    print("jm 허브 — 작업 폴더 %s · IDE 미리보기 PORT %d" % (root, a.port), flush=True)
+    key = secrets.token_hex(4)  # 화면에서 Codex 로 글 보낼 때 필요한 열쇠 8자리(켤 때마다 새로)
+    save_key(a.port, key)
+    srv = make_server(root, a.host, a.port, key=key)
+    print("jm 허브 — 작업 폴더 %s · IDE 미리보기 PORT %d · Codex 보내기 열쇠 %s" % (root, a.port, key), flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

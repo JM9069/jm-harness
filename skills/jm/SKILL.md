@@ -1,6 +1,6 @@
 ---
 name: jm
-description: jm 하네스 — 과제 README · 첨부 자료를 분석해 진행판(docs/jm/board.json)을 채우고(요구 · 담당자 질문 · 기능 · 결정 · 자동/직접 검증 · 커밋 계획 · 할 일), 구현 중에는 진행판을 갱신하며, 끝에는 서술형 대비 메모를 실제 코드 근거로 쓴다. "$jm 분석" · "$jm 답 Q번호 <원문>" · "$jm 진행" · "$jm 서술형" · "$jm 마무리" · "$jm 도우미" 로 부른다.
+description: jm 하네스 — 과제 README · 첨부 자료를 분석해 진행판(docs/jm/board.json)을 채우고(요구 · 담당자 질문 · 기능 · 결정 · 자동/직접 검증 · 커밋 계획 · 할 일), 제출 md 를 진행판에서 자동 갱신하게 등록하며, 끝에는 서술형 대비 메모를 실제 코드 근거로 쓴다. "$jm 분석" · "$jm 제출문서 <지시>" · "$jm 답 Q번호 <원문>" · "$jm 진행" · "$jm 서술형" · "$jm 마무리" · "$jm 도우미" 로 부른다.
 ---
 
 # jm — 진행판으로 과제 풀기
@@ -26,7 +26,7 @@ description: jm 하네스 — 과제 README · 첨부 자료를 분석해 진행
  "req":      [{"text": "README 요구 문장 원문 그대로", "where": "어느 기능 · 결정 · 검증에 반영(F1 · D2 · A3)"}],
  "question": [{"text": "담당자에게 물을 것(업무 말로, 한 번에 한 가지)", "stage": 1, "why": "답에 따라 무엇이 바뀌나"}],
  "feature":  [{"title": "기능", "priority": "must|should|wont|red", "note": "근거(R번호 · 담당자) · 안 하면 왜 안 하나"}],
- "decision": [{"title": "정할 것", "options": ["안1", "안2"], "recommend": "추천과 이유", "who": "담당자|유저"}],
+ "decision": [{"title": "정할 것", "options": ["안1", "안2"], "recommend": "AI 추천안(이유)", "who": "담당자|유저", "rejected": "버린 안과 이유(정한 뒤)"}],
  "auto":     [{"title": "확인할 것(C 기준)", "cmd": "bash -lc 로 돌 명령", "expect_code": 0, "expect_text": "출력에 있어야 할 글자(선택)", "todo": "T번호(통과하면 완료)", "watch": false, "timeout": 60}],
  "manual":   [{"title": "사람이 봐야 하는 것", "how": "어디서 무엇을 보고 무엇이면 통과"}],
  "todo":     [{"title": "순서대로 할 일", "kind": "process|build", "check": "끝났다는 증거"}],
@@ -40,6 +40,25 @@ description: jm 하네스 — 과제 README · 첨부 자료를 분석해 진행
 - manual: 화면 모양 · 문구 · 담당자 의도와 맞는지처럼 명령으로 못 보는 것만.
 - todo: 세로 조각(입력 → 처리 → 출력이 한 바퀴 도는 얇은 기능) 먼저 · 덜 위험한 것 → 위험한 것. 구현 todo 는 `kind: build` 이고 검증(auto 의 `todo`)과 연결한다.
 - commit: 단계가 끝날 때마다 작게. `git add -A` · `git add .` 금지(파일 이름으로).
+
+## $jm 제출문서 <README 의 제출 문서 지시 원문>
+- README(또는 유저가 붙여 넣은 지시)가 요구하는 md 파일마다 파일 이름 · 칸(제목) · 칸마다 적을 내용을 그대로 옮겨 `docs/jm/deliver.json` 을 쓴다 → `python3 jmkit/jm.py deliver`
+- 칸마다 내용 출처(source)를 고른다. 진행판이 바뀔 때마다 자동으로 다시 써진다:
+  - `summary` 문제 요약 · `deliverables` 제출물 · `requirements` README 요구
+  - `answers` 담당자와 확인한 기준(답 받은 질문) · `questions_open` 아직 못 물은 것 · `open_items` 남은 확인 사항(질문 + 미정 결정 + 남은 할 일)
+  - `decisions` 결정 · 이유 · 선택지 · 버린 안(`rejected` 칸) · `ai_judgments` AI 제안(recommend) ↔ 내 결정(chosen) · 채택 여부
+  - `features` 기능 · `unfinished` 구현 안 됨 · 안 함과 이유 · `checks` 자동 + 직접 검증 결과 · `todos` 할 일 · `commits` 커밋 기록 · `prompts` 내가 Codex 에 한 요청(대화 기록)
+  - `note:이름` 서술형 글 칸 — `python3 jmkit/jm.py note 이름 "사실만 담은 글"` 로 채운다 · `text:고정 글`
+- **README 가 «본인이 직접 작성» 을 요구한 칸은 `"mode": "manual"` 로** 둔다(자동으로 안 씀 · `hint` 에 무엇을 쓸지). 그 칸에 넣을 재료는 채팅으로만 정리해 준다.
+- 칸 제목 · 파일 이름은 README 원문 그대로. 자동 칸은 `<!-- jm:begin … -->` 표시 안만 바뀌고, 표시 밖에 사람이 쓴 글은 그대로 남는다.
+
+```json
+{"files": [{"path": "DECISIONS.md", "title": "판단 기록", "sections": [
+  {"title": "판단 근거", "source": "decisions"},
+  {"title": "담당자와 확인한 기준", "source": "answers"},
+  {"title": "남은 확인 사항", "source": "open_items"},
+  {"title": "AI 협업 회고", "mode": "manual", "hint": "AI 에게 맡긴 것 · 직접 판단한 것을 내 말로"}]}]}
+```
 
 ## $jm 답 Q번호 <담당자 답 원문>
 - `set Q번호 status=answered answer="원문"` → 그 답이 바꾸는 기능 · 결정 · 검증 · 할 일을 고친다(`set` · `add`) → 새로 생긴 애매함은 새 질문으로 → 바뀐 번호만 한 줄씩 보고.

@@ -8,7 +8,16 @@ BRANCH="${JM_BRANCH:-main}"
 DEST="${JM_DIR:-jmkit}"
 URL="${JM_URL:-https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz}"
 
-if [ -e "$DEST" ]; then echo "중단: $PWD/$DEST 가 이미 있음 (덮어쓰지 않음)"; exit 1; fi
+if [ -e "$DEST" ]; then
+    # 새 판으로 바꾸기: curl -sL jm9069.github.io/h | JM_UPDATE=1 bash  (진행판 docs/jm 은 그대로 남는다)
+    if [ "${JM_UPDATE:-0}" = "1" ] && [ -f "$DEST/jm.py" ]; then
+        bash "$DEST/start.sh" stop >/dev/null 2>&1 || true
+        rm -rf "$DEST"
+        echo "옛 $DEST 지움(진행판 docs/jm 은 유지)"
+    else
+        echo "중단: $PWD/$DEST 가 이미 있음 — 새 판으로 바꾸려면: curl -sL jm9069.github.io/h | JM_UPDATE=1 bash"; exit 1
+    fi
+fi
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 if ! curl -fsSL --connect-timeout 15 "$URL" -o "$TMP/jm.tar.gz"; then
@@ -29,7 +38,11 @@ fi
 # Codex 가 읽는 곳에 $jm 스킬 복사
 SK="${CODEX_HOME:-$HOME/.codex}/skills"
 mkdir -p "$SK"
-if [ -e "$SK/jm" ]; then echo "스킬 jm 이미 있음 — 그대로 둠"; else cp -r "$DEST/skills/jm" "$SK/jm" && echo "스킬 → $SK/jm"; fi
+if [ -e "$SK/jm" ] && ! grep -q "jm 하네스" "$SK/jm/SKILL.md" 2>/dev/null; then
+    echo "다른 jm 스킬이 이미 있음 — 그대로 둠"
+else
+    rm -rf "$SK/jm" && cp -r "$DEST/skills/jm" "$SK/jm" && echo "스킬 → $SK/jm (Codex 를 새로 띄우면 반영)"
+fi
 
 python3 "$DEST/jm.py" init
 bash "$DEST/start.sh" || echo "허브를 못 켰음 — 터미널에서 bash $DEST/start.sh"

@@ -8,6 +8,9 @@ const PRIO = { must: '⭐ 필수', should: '🟢 하면 좋음', wont: '🟠 안
 const CMDS = [
   ['키트 설치(작업 폴더에서, 허브까지 켜짐)', 'cd ~/workspace && curl -sL jm9069.github.io/h | bash'],
   ['허브 다시 켜기 · 끄기 · 상태', 'bash ~/workspace/jmkit/start.sh  # stop · status'],
+  ['Codex 보내기 열쇠 다시 보기', 'bash ~/workspace/jmkit/start.sh key'],
+  ['하네스를 새 판으로 바꾸기(진행판 유지)', 'cd ~/workspace && curl -sL jm9069.github.io/h | JM_UPDATE=1 bash'],
+  ['제출 문서 등록(MAIN 에) — README 의 제출 문서 지시를 붙여 넣기', "$jm 제출문서 <README 지시 원문>"],
   ['MAIN(설계 + 구현) — 새 터미널 탭', "codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 분석'"],
   ['HELP(질문 다듬기 · 서술형 · 설명) — 새 터미널 탭', "codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 도우미'"],
   ['자동 검증 전부 실행', 'python3 ~/workspace/jmkit/jm.py run all'],
@@ -15,6 +18,7 @@ const CMDS = [
   ['진행판 요약(터미널)', 'python3 ~/workspace/jmkit/jm.py show'],
 ];
 let S = null, tab = localStorage.getItem('jm.tab') || 'prog', lastKey = '', practice = null;
+const draft = { msg: '', sel: new Set(), key: localStorage.getItem('jm.key') || '' };  // 다시 그려도 쓰던 글 · 고른 세션 유지
 
 function editing() {
   const a = document.activeElement;
@@ -29,7 +33,7 @@ async function load(force) {
   $('#title').textContent = S.board.title || '';
   const dirty = (S.git.files || []).length;
   $('#dirty').innerHTML = S.git.repo ? (dirty ? `<span class="pill warn">커밋 안 된 파일 ${dirty}</span>` : '<span class="pill ok">커밋 깨끗</span>') : '';
-  const key = JSON.stringify([S.board, S.git, (S.codex || []).map(c => [c.file, c.msgs.length])]);
+  const key = JSON.stringify([S.board, S.git, (S.codex || []).map(c => [c.file, c.msgs.length]), S.deliver]);
   if (force || (key !== lastKey && !editing() && !practice)) { lastKey = key; render(); }
 }
 async function save(section, id, fields) {
@@ -130,6 +134,16 @@ const VIEWS = {
     h += '<h2>최근 커밋</h2><div class="card">' + (g.log || []).map(c => `<code>${esc(c.hash)}</code> ${esc(c.msg)}`).join('<br>') + '</div>';
     return h;
   },
+  dlvr() {
+    const d = S.deliver || {};
+    let h = '<div class="hint">시험 README 가 요구한 md 파일을 «$jm 제출문서 <README 의 해당 지시 붙여넣기>» 로 등록하면, 진행판이 바뀔 때마다 <b>자동 칸</b>만 다시 쓴다. <b>직접 칸</b>과 표시(&lt;!-- jm:begin --&gt;) 밖에 쓴 글은 건드리지 않는다.</div>';
+    if (d.error) h += `<div class="card bad">설정 오류: ${esc(d.error)}</div>`;
+    if (!d.config) return h + empty('등록된 제출 문서가', 'MAIN 에 «$jm 제출문서 …»');
+    return h + d.files.map(f => `<div class="card"><div class="row"><b><code>${esc(f.path)}</code></b>${f.exists ? '<span class="pill ok">있음</span>' : '<span class="pill warn">아직 없음</span>'}</div>` +
+      '<table><tr><th>칸</th><th>방식</th><th>내용 출처</th></tr>' + f.sections.map(s =>
+        `<tr><td>${esc(s.title)}</td><td>${s.mode === 'manual' ? '<span class="pill warn">직접 작성</span>' : '<span class="pill ok">자동</span>'}</td><td class="small muted">${esc(s.source)}</td></tr>`).join('') + '</table>' +
+      `<details><summary class="small muted">파일 내용 보기</summary><pre>${esc(f.content)}</pre></details></div>`).join('');
+  },
   essa() {
     const e = S.board.essay || [];
     if (practice) return practiceView();
@@ -143,7 +157,14 @@ const VIEWS = {
   codx() {
     const cs = S.codex || [];
     if (!cs.length) return empty('작업 폴더에서 띄운 Codex 대화가', '터미널에서 codex 를 띄우면 여기에 보인다(최근 12시간)');
-    return cs.map(c => `<div class="card"><div class="row"><b>세션 ${esc(c.id || c.file)}</b><span class="small muted">${esc(c.cwd)}</span>${c.tokens ? `<span class="pill">토큰 ${Number(c.tokens).toLocaleString()}</span>` : ''}</div>` +
+    if (cs.length === 1 && cs[0].uuid) draft.sel.add(cs[0].uuid);
+    let h = '<div class="card"><b>열린 Codex 에 보내기</b> <span class="small muted">— 고른 세션의 입력 대기열에 들어간다(일하는 중이면 그 턴이 끝난 뒤). 성공 = 등록까지</span>' +
+      `<div class="row"><input type="text" id="jmkey" placeholder="열쇠(허브를 켠 터미널 · bash jmkit/start.sh key)" value="${esc(draft.key)}" style="max-width:320px"></div>` +
+      '<div class="row">' + cs.map(c => `<label class="pill"><input type="checkbox" data-send="${esc(c.uuid || '')}" ${draft.sel.has(c.uuid) ? 'checked' : ''}> ${esc(c.name || c.id)}</label>`).join(' ') +
+      '<button class="btn ghost small" data-act="sendall">모두 고르기</button></div>' +
+      `<textarea id="sendmsg" placeholder="보낼 글 (예: $jm 진행 · 지금 단계 보고해 줘)">${esc(draft.msg)}</textarea>` +
+      '<div class="row"><button class="btn" data-act="send">보내기</button><span id="sendres" class="small muted"></span></div></div>';
+    return h + cs.map(c => `<div class="card"><div class="row"><b>${esc(c.name || '세션 ' + (c.id || c.file))}</b><span class="id">${esc(c.id || '')}</span><span class="small muted">${esc(c.cwd)}</span>${c.tokens ? `<span class="pill">토큰 ${Number(c.tokens).toLocaleString()}</span>` : ''}</div>` +
       c.msgs.slice().reverse().map(m => `<div class="msg ${m.role}"><div class="small muted">${m.role === 'user' ? '🚹 나' : '🤖 Codex'} · ${esc((m.ts || '').slice(11, 19))}</div><div>${esc(m.text).replace(/\n/g, '<br>')}</div></div>`).join('') + '</div>').join('');
   },
   cmds() {
@@ -214,9 +235,35 @@ document.addEventListener('click', async ev => {
     const msg = ($('#cmsg').value || '').trim();
     const q = s => "'" + s.replace(/'/g, "'\\''") + "'";
     $('#cmdout').textContent = !files.length ? '고른 파일이 없음' : !msg ? '메시지를 쓰세요' : `git add -- ${files.map(q).join(' ')} && git commit -m ${q(msg)}`;
+  } else if (act === 'sendall') {
+    document.querySelectorAll('[data-send]').forEach(c => { c.checked = true; if (c.dataset.send) draft.sel.add(c.dataset.send); });
+  } else if (act === 'send') {
+    const key = draft.key.trim(), message = draft.msg.trim();
+    const threads = [...draft.sel].filter(u => (S.codex || []).some(c => c.uuid === u));
+    if (!key || !message || !threads.length) { $('#sendres').textContent = '열쇠 · 세션 · 글을 모두 채우세요'; return; }
+    localStorage.setItem('jm.key', key);
+    t.disabled = true; $('#sendres').textContent = '보내는 중…';
+    try {
+      const r = await fetch('api/send', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JM': '1', 'X-JM-Key': key }, body: JSON.stringify({ threads, message }) });
+      const j = await r.json();
+      if (j.error) { $('#sendres').textContent = '실패: ' + j.error; }
+      else {
+        const bad = Object.entries(j.results).filter(([, v]) => !v.ok);
+        $('#sendres').textContent = bad.length ? '일부 실패: ' + bad.map(([k, v]) => k.slice(0, 8) + ' ' + v.out).join(' / ') : `등록됨 ${threads.length}개 세션`;
+        if (!bad.length) { draft.msg = ''; $('#sendmsg').value = ''; }
+      }
+    } finally { t.disabled = false; }
   } else if (act === 'copy') {
     copyText(CMDS[+t.dataset.i][1], t);
   }
+});
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'sendmsg') draft.msg = ev.target.value;
+  if (ev.target.id === 'jmkey') draft.key = ev.target.value;
+});
+document.addEventListener('change', ev => {
+  const u = ev.target.dataset && ev.target.dataset.send;
+  if (u) { if (ev.target.checked) draft.sel.add(u); else draft.sel.delete(u); }
 });
 document.addEventListener('paste', ev => { if (practice && ev.target.id === 'ptext') { ev.preventDefault(); } });
 function copyText(text, btn) {

@@ -26,6 +26,21 @@ cd ~/workspace && curl -sL jm9069.github.io/h | bash
 | 마무리 | MAIN | `$jm 마무리` → 커밋 안 된 파일 · 위험 파일 확인 |
 | 도우미 | HELP 터미널 | `codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 도우미'` (코드는 고치지 않음) |
 
+새 판으로 바꾸기(진행판은 유지): `curl -sL jm9069.github.io/h | JM_UPDATE=1 bash`
+
+## 제출 문서 자동 갱신
+
+시험 README 가 요구하는 md(예: `DECISIONS.md`, AI 협업 기록)를 MAIN 에 `$jm 제출문서 <README 지시 원문>` 으로 등록한다.
+`docs/jm/deliver.json` 에 파일 · 칸 · 내용 출처가 적히고, 진행판이 바뀔 때마다 **자동 칸**(`<!-- jm:begin … -->` 표시 안)만 다시 써진다.
+README 가 «본인이 직접 작성» 을 요구한 칸은 `mode: manual` — 제목과 안내만 만들고 내용은 내가 쓴다. 표시 밖에 쓴 글은 지워지지 않는다.
+내용 출처: `summary` · `requirements` · `answers` · `questions_open` · `open_items` · `decisions` · `ai_judgments` · `features` · `unfinished` · `checks` · `todos` · `commits` · `prompts` · `note:이름` · `text:글`
+
+## 화면에서 Codex 에 보내기
+
+허브 «Codex» 탭은 이 작업 폴더에서 띄운 Codex 세션(이름 · 대화)을 보여 주고, 고른 세션(여럿 가능)에 글을 넣는다(`codex queue --thread <UUID> --message <글>`).
+허브를 켤 때 터미널에 찍히는 **열쇠 8자리**를 한 번 넣어야 보낸다(`bash jmkit/start.sh key` 로 다시 보기 · 20번 틀리면 다시 켤 때까지 막힘).
+받는 세션이 일하는 중이면 그 턴이 끝난 뒤 들어가고, «등록됨» 은 큐에 들어갔다는 뜻일 뿐 읽었다는 뜻이 아니다.
+
 ## 구성
 
 | 파일 | 하는 일 |
@@ -43,7 +58,7 @@ cd ~/workspace && curl -sL jm9069.github.io/h | bash
 
 ## 안전
 
-- 허브는 **명령을 실행하지 않는다**. 자동 검증 명령은 `jm.py` 로만 만들고 터미널에서만 돈다.
+- 허브는 **셸 명령을 실행하지 않는다**. 자동 검증 명령은 `jm.py` 로만 만들고 터미널에서만 돈다. 허브가 부르는 외부 프로그램은 `codex queue` 하나(열쇠 · 이 폴더 세션 확인 뒤, 셸 없이)뿐이다.
 - 화면에서의 쓰기는 `X-JM: 1` 머리글이 있어야 받는다(다른 포트의 페이지가 보내는 요청 차단) · 고칠 수 있는 칸과 길이를 제한한다.
 - 커밋 탭은 명령을 만들어 보여 줄 뿐 실행하지 않는다 · `.env` · 가상환경 · DB · 로그 · 플랫폼 기록 파일 · `kit/` · `jmkit/` 은 위험 표시.
 - 비밀값은 진행판 · 출력에 쓰지 않는다(스킬 규칙).
