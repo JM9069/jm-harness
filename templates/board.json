@@ -1,0 +1,40 @@
+{
+ "title": "",
+ "summary": "",
+ "deliverables": [],
+ "stack": "",
+ "updated": "",
+ "req": [],
+ "question": [],
+ "feature": [],
+ "decision": [],
+ "auto": [],
+ "manual": [],
+ "todo": [
+  {"id": "T1", "status": "todo", "kind": "process", "title": "README · 첨부 자료 읽기, 업무 서비스 health 확인", "check": "curl 응답 200"},
+  {"id": "T2", "status": "todo", "kind": "process", "title": "$jm 분석 — 요구 · 질문 · 기능 · 결정 · 검증 · 커밋 계획 채우기", "check": "진행판 칸이 채워짐"},
+  {"id": "T3", "status": "todo", "kind": "process", "title": "담당자에게 쉬운 것부터 1개씩 질문하고 답을 Q 에 기록", "check": "질문 상태 answered"},
+  {"id": "T4", "status": "todo", "kind": "process", "title": "결정(D) 확정 → 만들 것 / 안 만들 것 합의", "check": "결정 모두 decided"},
+  {"id": "T5", "status": "todo", "kind": "process", "title": "첫 세로 조각(입력→처리→출력 한 바퀴) 구현 · 커밋", "check": "자동 검증 통과"},
+  {"id": "T6", "status": "todo", "kind": "process", "title": "나머지 기능 구현 — 기능마다 검증 · 커밋", "check": "기능 상태 done"},
+  {"id": "T7", "status": "todo", "kind": "process", "title": "run.sh 냉시동(새 셸에서 bash run.sh) 확인", "check": "health 200"},
+  {"id": "T8", "status": "todo", "kind": "process", "title": "DECISIONS.md 작성(판단 근거 · 담당자 기준 · 남은 확인)", "check": "파일 커밋"},
+  {"id": "T9", "status": "todo", "kind": "process", "title": "$jm 서술형 → 답 메모 읽고 연습 모드 1회", "check": "연습 횟수 1+"},
+  {"id": "T10", "status": "todo", "kind": "process", "title": "마감 15분 전: 비밀값 · 커밋 상태 점검 후 제출", "check": "커밋 안 된 파일 0"}
+ ],
+ "commit": [],
+ "essay": [
+  {"id": "E1", "cat": "구조", "q": "제출물의 전체 구조(파일 · 모듈)와 각 모듈의 책임을 설명하라", "answer": "", "evidence": "", "practice": []},
+  {"id": "E2", "cat": "데이터 흐름", "q": "입력 데이터가 어디서 와서 어떤 단계를 거쳐 화면 · 결과로 가는가", "answer": "", "evidence": "", "practice": []},
+  {"id": "E3", "cat": "책임 분리", "q": "핵심 기능의 책임은 어느 모듈이 갖는가, 왜 그렇게 나눴나", "answer": "", "evidence": "", "practice": []},
+  {"id": "E4", "cat": "결정 이유", "q": "고른 구조 · 기술과 그 이유, 검토했지만 버린 대안은", "answer": "", "evidence": "", "practice": []},
+  {"id": "E5", "cat": "검증", "q": "무엇을 어떻게 검증했나(테스트 · 실행), 검증하지 못한 것은", "answer": "", "evidence": "", "practice": []},
+  {"id": "E6", "cat": "실패 · timeout", "q": "외부 호출이 느리거나 실패하면 어떻게 동작하나, 어디서 깨질 수 있나", "answer": "", "evidence": "", "practice": []},
+  {"id": "E7", "cat": "담당자 합의", "q": "담당자와 확인한 기준과 그것이 구현에 준 영향", "answer": "", "evidence": "", "practice": []},
+  {"id": "E8", "cat": "미구현 · 한계", "q": "구현하지 못했거나 일부러 뺀 것과 이유, 다음에 할 일", "answer": "", "evidence": "", "practice": []},
+  {"id": "E9", "cat": "개선", "q": "다시 만든다면 더 나은 구조는 무엇인가", "answer": "", "evidence": "", "practice": []},
+  {"id": "E10", "cat": "가장 큰 문제", "q": "가장 어려웠던 문제와 해결 과정(실패 → 수정 → 재확인)", "answer": "", "evidence": "", "practice": []},
+  {"id": "E11", "cat": "AI 활용", "q": "AI 에게 무엇을 맡기고 무엇을 직접 판단 · 검증했나", "answer": "", "evidence": "", "practice": []},
+  {"id": "E12", "cat": "전제 오류", "q": "(질문의 전제가 내 구현과 다를 때) «제 제출물은 그렇지 않고 실제로는 … 입니다» 로 시작해 내 작업을 설명", "answer": "", "evidence": "", "practice": []}
+ ]
+}
