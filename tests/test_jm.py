@@ -141,6 +141,26 @@ class DeliverTest(Base):
         self.jm("deliver")
         self.assertEqual(mtime, os.path.getmtime(os.path.join(self.root, "docs", "AI_COLLAB.md")))
 
+    def test_fills_given_template_under_existing_headings(self):
+        self.jm("init")
+        with open(os.path.join(self.root, "HOW_TO_RUN.md"), "w", encoding="utf-8") as f:
+            f.write("# How to run\n\n## 1. 실행 방법\n- 컨테이너로 띄우는 명령:\n\n## 8. 구현하지 못한 것\n\n(답변)\n\n## 9. 먼저 볼 곳\n")
+        self.write_cfg({"files": [{"path": "HOW_TO_RUN.md", "sections": [
+            {"title": "1. 실행 방법", "source": "note:run"},
+            {"title": "8. 구현하지 못한 것", "source": "unfinished"},
+            {"title": "9. 먼저 볼 곳", "mode": "manual"}]}]})
+        self.jm("note", "run", "docker compose up --build")
+        text = self.read("HOW_TO_RUN.md")
+        self.assertIn("## 1. 실행 방법\n\n<!-- jm:begin s1 -->\ndocker compose up --build\n<!-- jm:end s1 -->", text)
+        self.assertIn("- 컨테이너로 띄우는 명령:", text)   # 양식의 원래 줄은 남는다
+        self.assertNotIn("(답변)", text)                     # 자리 글은 자동 칸으로 바뀐다
+        self.assertEqual(text.count("## 9. 먼저 볼 곳"), 1)  # 직접 칸은 그대로
+        self.jm("note", "run", "bash run.sh")
+        text = self.read("HOW_TO_RUN.md")
+        self.assertIn("bash run.sh", text)
+        self.assertNotIn("docker compose up --build", text)
+        self.assertEqual(text.count("jm:begin s1"), 1)
+
     def test_bad_paths_and_sources_rejected(self):
         self.jm("init")
         self.write_cfg({"files": [{"path": "../outside.md", "sections": []}]})

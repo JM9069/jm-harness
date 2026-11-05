@@ -639,18 +639,24 @@ def render_deliverables(root, board=None):
             for i, s in enumerate(fi.get("sections", [])):
                 sid = s.get("id") or "s%d" % (i + 1)
                 if s.get("mode") == "manual":
-                    if ("## " + s["title"]) not in text:
+                    if not re.search(r"^#{1,6} +%s *$" % re.escape(s["title"].strip()), text, re.M):
                         text = text.rstrip("\n") + "\n\n## %s\n\n<!-- 직접 작성 칸: %s -->\n" % (s["title"], s.get("hint") or "")
                         changed += 1
                     continue
                 pat = re.compile(r"<!-- jm:begin %s -->.*?<!-- jm:end %s -->" % (re.escape(sid), re.escape(sid)), re.S)
                 new = _block(sid, render_source(root, board, s["source"], git))
+                head = re.compile(r"^(#{1,6}) +%s *$" % re.escape(s["title"].strip()), re.M)
+                hm = head.search(text)
                 if pat.search(text):
                     text2 = pat.sub(lambda m: new, text, count=1)
                     changed += text2 != text
                     text = text2
-                elif ("## " + s["title"]) in text:
-                    warns.append("«%s» 칸의 자동 표시가 지워져 갱신하지 않음" % s["title"])
+                elif hm:
+                    # 시험이 준 양식(제목이 이미 있음): 제목 바로 아래에 자동 칸을 넣는다 · 바로 뒤 «(답변)» 자리 글은 걷어 낸다
+                    after = re.sub(r"^\s*\n\s*\((답변|answer)\)[ \t]*(?=\n|$)", "", text[hm.end():], count=1)
+                    rest = after.lstrip("\n")
+                    text = text[:hm.end()] + "\n\n" + new + ("\n\n" + rest if rest else "\n")
+                    changed += 1
                 else:
                     text = text.rstrip("\n") + "\n\n## %s\n\n%s\n" % (s["title"], new)
                     changed += 1
