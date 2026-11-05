@@ -45,6 +45,8 @@ else
 fi
 
 python3 "$DEST/jm.py" init
+# 앞 회차의 허브가 살아 있으면 옛 코드로 돈다 → 끄고 새 판으로 켠다
+bash "$DEST/start.sh" stop >/dev/null 2>&1 || true
 bash "$DEST/start.sh" || echo "허브를 못 켰음 — 터미널에서 bash $DEST/start.sh"
 
 cat <<EOF
