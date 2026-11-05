@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ======= jm 하네스 설치 — 작업 폴더에서: curl -sL jm9069.github.io/h | bash =======
+# ======= jm 하네스 설치 — 작업 폴더에서: curl -sL jm9069.github.io/j | bash =======
 # 하는 일: jmkit/ 에 풀기 → kit 이 커밋에 안 섞이게 exclude → $jm 스킬 복사 → 진행판 만들기 → 허브(3156) 켜기
 # 과제 파일은 건드리지 않는다. 이미 있는 jmkit/ · 스킬은 덮어쓰지 않는다.
 set -eu
@@ -9,13 +9,13 @@ DEST="${JM_DIR:-jmkit}"
 URL="${JM_URL:-https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz}"
 
 if [ -e "$DEST" ]; then
-    # 새 판으로 바꾸기: curl -sL jm9069.github.io/h | JM_UPDATE=1 bash  (진행판 docs/jm 은 그대로 남는다)
+    # 새 판으로 바꾸기: curl -sL jm9069.github.io/j | JM_UPDATE=1 bash  (진행판 docs/jm 은 그대로 남는다)
     if [ "${JM_UPDATE:-0}" = "1" ] && [ -f "$DEST/jm.py" ]; then
         bash "$DEST/start.sh" stop >/dev/null 2>&1 || true
         rm -rf "$DEST"
         echo "옛 $DEST 지움(진행판 docs/jm 은 유지)"
     else
-        echo "중단: $PWD/$DEST 가 이미 있음 — 새 판으로 바꾸려면: curl -sL jm9069.github.io/h | JM_UPDATE=1 bash"; exit 1
+        echo "중단: $PWD/$DEST 가 이미 있음 — 새 판으로 바꾸려면: curl -sL jm9069.github.io/j | JM_UPDATE=1 bash"; exit 1
     fi
 fi
 

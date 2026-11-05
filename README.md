@@ -6,7 +6,7 @@
 ## 설치 — 과제 작업 폴더에서 한 줄
 
 ```bash
-cd ~/workspace && curl -sL jm9069.github.io/h | bash
+cd ~/workspace && curl -sL jm9069.github.io/j | bash
 ```
 
 1. `jmkit/` 에 풀고 `.git/info/exclude` 에 `jmkit/` · `kit/` 를 넣는다(과제 커밋에 안 섞임)
@@ -26,7 +26,7 @@ cd ~/workspace && curl -sL jm9069.github.io/h | bash
 | 마무리 | MAIN | `$jm 마무리` → 커밋 안 된 파일 · 위험 파일 확인 |
 | 도우미 | HELP 터미널 | `codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 도우미'` (코드는 고치지 않음) |
 
-새 판으로 바꾸기(진행판은 유지): `curl -sL jm9069.github.io/h | JM_UPDATE=1 bash`
+새 판으로 바꾸기(진행판은 유지): `curl -sL jm9069.github.io/j | JM_UPDATE=1 bash`
 
 ## 제출 문서 자동 갱신
 

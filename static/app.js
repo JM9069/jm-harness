@@ -6,10 +6,10 @@ const NEXT = { todo: ['todo', 'doing', 'done'], feature: ['todo', 'doing', 'done
 const LABEL = { todo: '할 일', doing: '진행 중', done: '완료', wont: '안 만듦', draft: '초안', asked: '물어봄', answered: '답 받음', open: '미정', decided: '결정', fail: '실패' };
 const PRIO = { must: '⭐ 필수', should: '🟢 하면 좋음', wont: '🟠 안 함', red: '🔴 금지' };
 const CMDS = [
-  ['키트 설치(작업 폴더에서, 허브까지 켜짐)', 'cd ~/workspace && curl -sL jm9069.github.io/h | bash'],
+  ['키트 설치(작업 폴더에서, 허브까지 켜짐)', 'cd ~/workspace && curl -sL jm9069.github.io/j | bash'],
   ['허브 다시 켜기 · 끄기 · 상태', 'bash ~/workspace/jmkit/start.sh  # stop · status'],
   ['Codex 보내기 열쇠 다시 보기', 'bash ~/workspace/jmkit/start.sh key'],
-  ['하네스를 새 판으로 바꾸기(진행판 유지)', 'cd ~/workspace && curl -sL jm9069.github.io/h | JM_UPDATE=1 bash'],
+  ['하네스를 새 판으로 바꾸기(진행판 유지)', 'cd ~/workspace && curl -sL jm9069.github.io/j | JM_UPDATE=1 bash'],
   ['제출 문서 등록(MAIN 에) — README 의 제출 문서 지시를 붙여 넣기', "$jm 제출문서 <README 지시 원문>"],
   ['MAIN(설계 + 구현) — 새 터미널 탭', "codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 분석'"],
   ['HELP(질문 다듬기 · 서술형 · 설명) — 새 터미널 탭', "codex -m gpt-6.1-sol -c model_reasoning_effort=medium '$jm 도우미'"],
